@@ -1,93 +1,121 @@
 #!/usr/bin/env python3
-"""
+“””
 generate_token.py — One-time OAuth2 flow to create yt_token.json.
 
-Run this locally BEFORE setting up CI. It opens a browser for Google
-authorisation and saves the token to yt_token.json.
+Works in GitHub Codespaces, remote SSH, and local machines.
 
 Usage:
-    python generate_token.py
-    python generate_token.py --secrets path/to/client_secrets.json
-    python generate_token.py --token-out my_token.json
-"""
+python generate_token.py
+python generate_token.py –secrets path/to/client_secrets.json
+python generate_token.py –token-out my_token.json
+python generate_token.py –port 8080
+“””
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate YouTube OAuth token.")
-    parser.add_argument(
-        "--secrets",
-        default="client_secrets.json",
-        help="Path to client_secrets.json (default: client_secrets.json)",
-    )
-    parser.add_argument(
-        "--token-out",
-        default="yt_token.json",
-        help="Where to save the token (default: yt_token.json)",
-    )
-    args = parser.parse_args()
+parser = argparse.ArgumentParser(description=“Generate YouTube OAuth token.”)
+parser.add_argument(
+“–secrets”,
+default=“client_secrets.json”,
+help=“Path to client_secrets.json (default: client_secrets.json)”,
+)
+parser.add_argument(
+“–token-out”,
+default=“yt_token.json”,
+help=“Where to save the token (default: yt_token.json)”,
+)
+parser.add_argument(
+“–port”,
+type=int,
+default=8080,
+help=“Local port for OAuth redirect (default: 8080)”,
+)
+args = parser.parse_args()
 
-    secrets_path = Path(args.secrets)
-    token_path = Path(args.token_out)
+```
+secrets_path = Path(args.secrets)
+token_path = Path(args.token_out)
+PORT = args.port
 
-    if not secrets_path.exists():
-        print(f"ERROR: {secrets_path} not found.")
-        print("Download it from: Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client")
-        sys.exit(1)
+if not secrets_path.exists():
+    print(f"ERROR: {secrets_path} not found.")
+    print("Download it from:")
+    print("  Google Cloud Console -> APIs & Services -> Credentials -> OAuth 2.0 Client ID")
+    sys.exit(1)
 
-    try:
-        from google_auth_oauthlib.flow import InstalledAppFlow
-    except ImportError:
-        print("ERROR: google-auth-oauthlib not installed.")
-        print("Run: pip install -r requirements.txt")
-        sys.exit(1)
+try:
+    from google_auth_oauthlib.flow import InstalledAppFlow
+except ImportError:
+    print("ERROR: google-auth-oauthlib not installed.")
+    print("Run: pip install -r requirements.txt")
+    sys.exit(1)
 
-    SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
-    print(f"Loading secrets from: {secrets_path}")
+# ------------------------------------------------------------------
+# Pre-flight checklist
+# ------------------------------------------------------------------
+print("=" * 64)
+print(" YouTube OAuth Token Generator")
+print("=" * 64)
+print()
+print("Before continuing, complete these steps in Google Cloud Console:")
+print()
+print(f"  STEP 1 — Add this Authorized Redirect URI to your OAuth client:")
+print(f"           http://localhost:{PORT}/")
+print()
+print("    Cloud Console -> APIs & Services -> Credentials")
+print("    -> Edit your Desktop OAuth 2.0 Client -> Authorized redirect URIs")
+print("    -> + Add URI -> http://localhost:{PORT}/ -> Save".format(PORT=PORT))
+print()
+print("  STEP 2 — Add your Google account as a Test User (if app is in Testing):")
+print("    Cloud Console -> APIs & Services -> OAuth consent screen")
+print("    -> Test users -> + Add Users -> your-email@gmail.com")
+print()
+
+in_codespaces = "CODESPACE_NAME" in os.environ
+if in_codespaces:
+    print("  STEP 3 — [Codespaces] Forward the port:")
+    print(f"    VS Code bottom panel -> Ports tab -> Add Port -> {PORT}")
+    print(f"    Right-click {PORT} -> Port Visibility -> Public")
+    print()
+    print("  NOTE: After forwarding, the redirect URL Google sends back")
+    print("  will still be http://localhost:{PORT}/ — that is correct.".format(PORT=PORT))
+    print("  Codespaces intercepts localhost and tunnels it automatically.")
     print()
 
-    flow = InstalledAppFlow.from_client_secrets_file(str(secrets_path), SCOPES)
+input("Press Enter once the redirect URI is saved in Google Cloud Console...")
+print()
 
-    # run_local_server fails in remote environments (Codespaces, SSH, WSL)
-    # because the browser redirects to localhost which isn't reachable.
-    # Use run_console() instead: it prints a URL you open manually, then
-    # you paste the authorisation code back into the terminal.
-    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
-    auth_url, _ = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent",          # forces refresh_token to be returned
-    )
+flow = InstalledAppFlow.from_client_secrets_file(str(secrets_path), SCOPES)
 
-    print("=" * 60)
-    print("Open this URL in your browser (any device on any network):")
-    print()
-    print(auth_url)
-    print()
-    print("=" * 60)
-    print("After approving, Google will show a code. Paste it below.")
-    print()
+print(f"Starting local OAuth server on port {PORT}...")
+print("Open the URL below in your browser:")
+print()
 
-    code = input("Enter authorisation code: ").strip()
+creds = flow.run_local_server(
+    host="0.0.0.0",        # bind all interfaces so Codespaces proxy can reach it
+    port=PORT,
+    open_browser=False,    # no desktop inside a container
+    authorization_prompt_message=">>> Auth URL:\n{url}\n",
+    success_message="Auth complete — you can close this tab and return to the terminal.",
+)
 
-    from google.oauth2.credentials import Credentials
-    flow.fetch_token(code=code)
-    creds = flow.credentials
+token_path.write_text(creds.to_json())
+print()
+print(f"Token saved -> {token_path}")
+print()
+print("Next — encode it for GitHub Secrets:")
+print()
+print("  Linux / Codespaces:  base64 -w 0 yt_token.json")
+print("  macOS:               base64 -i yt_token.json")
+print()
+print("Paste the output as the YT_TOKEN_B64 GitHub Secret.")
+```
 
-    token_path.write_text(creds.to_json())
-    print()
-    print(f"Token saved to: {token_path}")
-    print()
-    print("Next step — encode it for GitHub Secrets:")
-    print()
-    print("  Linux/WSL:  base64 -w 0 yt_token.json")
-    print("  macOS:      base64 -i yt_token.json")
-    print()
-    print("Paste the output as the YT_TOKEN_B64 GitHub Secret.")
-
-
-if __name__ == "__main__":
-    main()
+if **name** == “**main**”:
+main()
