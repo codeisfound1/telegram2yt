@@ -1,1 +1,105 @@
-...
+name: Telegram → YouTube Short
+
+on:
+  schedule:
+    # Run daily at 10:00 UTC
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+    inputs:
+      tg_strategy:
+        description: "Message selection strategy"
+        required: false
+        default: "latest"
+        type: choice
+        options: [latest, random]
+      privacy:
+        description: "YouTube privacy status"
+        required: false
+        default: "public"
+        type: choice
+        options: [public, unlisted, private]
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── System dependencies (ffmpeg) ──────────────────────────────────
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg \
+            libglib2.0-0 \
+            fonts-dejavu-core
+
+      # ── Python ────────────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install --upgrade pip && pip install -r requirements.txt
+
+      # ── OAuth token (stored as base64-encoded JSON in Secrets) ────────
+      - name: Restore YouTube OAuth token
+        env:
+          YT_TOKEN_B64: ${{ secrets.YT_TOKEN_B64 }}
+        run: |
+          if [ -n "$YT_TOKEN_B64" ]; then
+            echo "$YT_TOKEN_B64" | base64 -d > yt_token.json
+            echo "OAuth token restored."
+          else
+            echo "::warning::YT_TOKEN_B64 secret not set — upload will fail unless yt_token.json is present."
+          fi
+
+      # ── Google client_secrets.json ────────────────────────────────────
+      - name: Restore Google client secrets
+        env:
+          YT_CLIENT_SECRETS_B64: ${{ secrets.YT_CLIENT_SECRETS_B64 }}
+        run: |
+          echo "$YT_CLIENT_SECRETS_B64" | base64 -d > client_secrets.json
+
+      # ── Build & Upload ────────────────────────────────────────────────
+      - name: Run pipeline
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHANNEL_IDS: ${{ secrets.TG_CHANNEL_IDS }}
+          TG_STRATEGY: ${{ github.event.inputs.tg_strategy || 'latest' }}
+          YT_PRIVACY: ${{ github.event.inputs.privacy || 'public' }}
+          YT_TITLE_TEMPLATE: "✨ {channel} | {date}"
+          YT_TAGS: "Shorts,YouTube Shorts,viral,trending"
+          VIDEO_DURATION: "30"
+          VIDEO_FPS: "30"
+          MUSIC_DB: "-12"
+        run: |
+          python main.py \
+            --output output_short.mp4 \
+            --duration 30 \
+            --privacy "$YT_PRIVACY"
+
+      # ── Upload artifact (for debugging) ───────────────────────────────
+      - name: Upload video artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-short-${{ github.run_number }}
+          path: output_short.mp4
+          retention-days: 3
+
+      # ── Refresh token (write back updated token) ──────────────────────
+      - name: Save refreshed OAuth token
+        if: always()
+        run: |
+          if [ -f yt_token.json ]; then
+            NEW_B64=$(base64 -w 0 yt_token.json)
+            echo "::notice::If your token was refreshed, update the YT_TOKEN_B64 secret with:"
+            echo "$NEW_B64"
+          fi
