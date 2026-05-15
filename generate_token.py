@@ -47,11 +47,35 @@ def main():
     SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
     print(f"Loading secrets from: {secrets_path}")
-    print("A browser window will open. Log in and grant YouTube upload access.")
     print()
 
     flow = InstalledAppFlow.from_client_secrets_file(str(secrets_path), SCOPES)
-    creds = flow.run_local_server(port=0, open_browser=True)
+
+    # run_local_server fails in remote environments (Codespaces, SSH, WSL)
+    # because the browser redirects to localhost which isn't reachable.
+    # Use run_console() instead: it prints a URL you open manually, then
+    # you paste the authorisation code back into the terminal.
+    flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",          # forces refresh_token to be returned
+    )
+
+    print("=" * 60)
+    print("Open this URL in your browser (any device on any network):")
+    print()
+    print(auth_url)
+    print()
+    print("=" * 60)
+    print("After approving, Google will show a code. Paste it below.")
+    print()
+
+    code = input("Enter authorisation code: ").strip()
+
+    from google.oauth2.credentials import Credentials
+    flow.fetch_token(code=code)
+    creds = flow.credentials
 
     token_path.write_text(creds.to_json())
     print()
