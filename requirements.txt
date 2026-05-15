@@ -1,0 +1,21 @@
+# Core video processing
+
+moviepy==1.0.3
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# Telegram
+
+requests>=2.31.0
+python-telegram-bot>=20.0
+
+# Google / YouTube
+
+google-auth>=2.22.0
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
+google-api-python-client>=2.100.0
+
+# Transitive / helpers
+
+httplib2>=0.22.0
